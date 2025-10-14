@@ -1,0 +1,63 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  email     String   @unique
+  password  String
+  role      String   @default("STAFF") // "ADMIN" | "STAFF"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Menu {
+  id        Int          @id @default(autoincrement())
+  name      String       @unique
+  price     Int
+  category  String?
+  status    String?
+  imageUrl  String?
+  items     OrderItem[]
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Order {
+  id           Int          @id @default(autoincrement())
+  code         String?      @unique   // ✅ เพิ่มรหัสออเดอร์ (optional แต่ unique)
+  customerName String
+  status       String
+  note         String?
+  total        Int?
+
+  items        OrderItem[]
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model OrderItem {
+  id        Int    @id @default(autoincrement())
+
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   Int
+
+  menu      Menu   @relation(fields: [menuId], references: [id])
+  menuId    Int
+
+  qty       Int
+  price     Int?
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
