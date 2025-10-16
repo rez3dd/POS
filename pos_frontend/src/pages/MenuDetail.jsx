@@ -4,8 +4,36 @@ import { useNavigate, useParams } from "react-router-dom";
 import AppLayout from "../components/shared/AppLayout";
 import SidebarAdmin from "../components/components for admin and staff/SidebarAdmin";
 import { getMenuById, updateMenu } from "../Services/Menu";
+import { listCategories } from "../Services/Categories";
+import { api } from "../Services/api";
 
-const CATS = ["ผัด", "แกง", "ต้ม", "ทอด", "อื่นๆ"];
+const API_BASE = (api?.defaults?.baseURL || "").replace(/\/+$/, "");
+const IMG_PLACEHOLDER =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='120'>
+      <rect width='100%' height='100%' fill='#2d2d2d'/>
+      <text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle'
+        fill='#8b8b8b' font-family='sans-serif' font-size='12'>no image</text>
+    </svg>`
+  );
+
+function abs(u) {
+  if (!u) return "";
+  let norm = String(u).replace(/\\/g, "/").trim();
+
+  if (/^https?:\/\//i.test(norm)) return norm;
+
+  norm = norm.replace(/^\.?\/*/, "");
+  if (!norm.startsWith("uploads/")) {
+    if (!norm.includes("/")) norm = `uploads/${norm}`;
+    else norm = `uploads/${norm.replace(/^\/+/, "")}`;
+  }
+
+  const path = `/${norm}`;
+  const base = API_BASE.replace(/\/api$/i, "");
+  return `${base}${path}`;
+}
 
 export default function MenuDetail() {
   const { id } = useParams();
@@ -18,11 +46,12 @@ export default function MenuDetail() {
   const [form, setForm] = useState({
     name: "",
     price: "",
-    category: "อื่นๆ",
-    status: "AVAILABLE", // ALWAYS UPPERCASE
+    categoryId: "",
+    status: "AVAILABLE",
   });
 
-  const [currentImage, setCurrentImage] = useState(null); // imageUrl จากฐานข้อมูล
+  const [categories, setCategories] = useState([]);
+  const [currentImage, setCurrentImage] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -31,39 +60,32 @@ export default function MenuDetail() {
     [imageFile]
   );
 
-  // ปิด object URL ป้องกัน memory leak
-  useEffect(() => {
-    return () => {
-      if (preview) URL.revokeObjectURL(preview);
-    };
-  }, [preview]);
-
-  // โหลดข้อมูลเมนู
+  // โหลดข้อมูล
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr("");
       try {
-        const data = await getMenuById(id);
+        const [cats, data] = await Promise.all([listCategories(), getMenuById(id)]);
         if (!alive) return;
+
+        setCategories(Array.isArray(cats) ? cats : cats?.data || []);
 
         setForm({
           name: data?.name || "",
           price: String(data?.price ?? ""),
-          category: data?.category || "อื่นๆ",
+          categoryId: data?.categoryId ?? "",
           status: (data?.status || "AVAILABLE").toUpperCase(),
         });
-        setCurrentImage(data?.imageUrl || null);
+        setCurrentImage(data?.imageUrl ? abs(data.imageUrl) : null);
       } catch (e) {
-        if (alive) setErr(e?.response?.data?.message || e?.message || "โหลดข้อมูลเมนูไม่สำเร็จ");
+        if (alive) setErr(e?.message || "โหลดข้อมูลเมนูไม่สำเร็จ");
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [id]);
 
   // บันทึก
@@ -72,36 +94,28 @@ export default function MenuDetail() {
     setSaving(true);
     setErr("");
     try {
-      // ส่ง key "image" ให้ตรงกับ backend (upload.single("image"))
-      const payload = {
+      await updateMenu(Number(id), {
         name: form.name,
         price: Number(form.price),
-        category: form.category || null,
-        status:
-          form.status === "AVAILABLE" || form.status === "UNAVAILABLE"
-            ? form.status
-            : "AVAILABLE",
-        image: imageFile || undefined,
-      };
+        categoryId: form.categoryId ? Number(form.categoryId) : null,
+        status: form.status,
+        imageFile, // มีไฟล์ก็อัปโหลด
+      });
 
-      const updated = await updateMenu(Number(id), payload);
-
-      // อัปเดตรูปทันที (ใช้ imageUrl จากคำตอบถ้ามี)
-      if (updated?.imageUrl) setCurrentImage(updated.imageUrl);
-      if (imageFile) {
-        setImageFile(null);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
+      // โหลดข้อมูลใหม่ เพื่อเอา imageUrl ล่าสุด
+      const fresh = await getMenuById(id);
+      setCurrentImage(fresh?.imageUrl ? abs(fresh.imageUrl) : null);
+      setImageFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
 
       alert("บันทึกสำเร็จ");
     } catch (e) {
-      setErr(e?.response?.data?.message || e?.message || "บันทึกไม่สำเร็จ");
+      setErr(e?.message || "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
   };
 
-  // ==== อัปโหลดรูป: click / drag & drop ====
   const onPickFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -109,21 +123,18 @@ export default function MenuDetail() {
     if (file.size > 5 * 1024 * 1024) return alert("ไฟล์ใหญ่เกินไป (เกิน 5MB)");
     setImageFile(file);
   };
-
   const clearFile = () => {
     setImageFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-
   const onDrop = (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-    if (!/^image\//.test(file.type)) return alert("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
-    if (file.size > 5 * 1024 * 1024) return alert("ไฟล์ใหญ่เกินไป (เกิน 5MB)");
+    if (!/^image\//.test(file.type)) return alert("กรุณาเลือกไฟล์รูปภาพ");
+    if (file.size > 5 * 1024 * 1024) return alert("ไฟล์ใหญ่เกิน 5MB");
     setImageFile(file);
   };
-
   const onDragOver = (e) => e.preventDefault();
 
   return (
@@ -131,11 +142,10 @@ export default function MenuDetail() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">แก้ไขเมนู #{id}</h1>
-          <div className="text-gray-400 text-sm">อัปเดตรายละเอียดเมนูและรูปภาพ</div>
         </div>
         <button
           onClick={() => nav("/menu")}
-          className="px-4 py-2 rounded-lg border border-[#35353f] bg-[#23232a] text-gray-300 hover:bg-[#35353f] transition"
+          className="px-4 py-2 rounded-lg border border-[#3f3e3e] bg-[#232323] text-gray-200 hover:bg-[#2d2d2d] transition"
         >
           ← กลับ
         </button>
@@ -148,16 +158,16 @@ export default function MenuDetail() {
       )}
 
       {loading ? (
-        <div className="animate-pulse h-52 bg-[#23232a] rounded-lg" />
+        <div className="animate-pulse h-52 bg-[#232323] rounded-lg border border-[#3f3e3e]" />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* ฟอร์มซ้าย */}
-          <div className="md:col-span-2 bg-[#18181b] rounded-xl border border-[#23232a] p-6">
+          <div className="md:col-span-2 rounded-xl bg-[#232323] border border-[#3f3e3e] p-6">
             <form onSubmit={onSave} className="space-y-4">
               <div>
                 <label className="block text-sm text-gray-300 mb-1">ชื่อเมนู</label>
                 <input
-                  className="w-full bg-[#23232a] border border-[#35353f] rounded-lg p-2 text-white"
+                  className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   required
@@ -170,7 +180,7 @@ export default function MenuDetail() {
                   <input
                     type="number"
                     min="0"
-                    className="w-full bg-[#23232a] border border-[#35353f] rounded-lg p-2 text-white"
+                    className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
                     value={form.price}
                     onChange={(e) => setForm({ ...form, price: e.target.value })}
                     required
@@ -179,14 +189,13 @@ export default function MenuDetail() {
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">หมวดหมู่</label>
                   <select
-                    className="w-full bg-[#23232a] border border-[#35353f] rounded-lg p-2 text-white"
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
+                    value={form.categoryId ?? ""}
+                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
                   >
-                    {CATS.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
+                    <option value="">— ไม่ระบุ —</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>
@@ -195,11 +204,9 @@ export default function MenuDetail() {
               <div>
                 <label className="block text-sm text-gray-300 mb-1">สถานะ</label>
                 <select
-                  className="w-full bg-[#23232a] border border-[#35353f] rounded-lg p-2 text-white"
+                  className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
                   value={form.status}
-                  onChange={(e) =>
-                    setForm({ ...form, status: e.target.value.toUpperCase() })
-                  }
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
                 >
                   <option value="AVAILABLE">พร้อมขาย</option>
                   <option value="UNAVAILABLE">ปิดขาย</option>
@@ -218,38 +225,37 @@ export default function MenuDetail() {
           </div>
 
           {/* รูปขวา */}
-          <div className="bg-[#18181b] rounded-xl border border-[#23232a] p-6">
+          <div className="rounded-xl bg-[#232323] border border-[#3f3e3e] p-6">
             <div className="text-white font-semibold mb-3">รูปภาพเมนู</div>
 
             <div className="mb-4">
               <img
-                src={preview || currentImage || "/noimg.png"}
+                src={preview || currentImage || IMG_PLACEHOLDER}
                 alt="preview"
-                className="w-full h-56 object-cover rounded-lg border border-[#35353f]"
+                className="w-full h-56 object-cover rounded-lg border border-[#3f3e3e]"
+                onError={(e) => (e.currentTarget.src = IMG_PLACEHOLDER)}
               />
             </div>
 
             <div
               onDrop={onDrop}
               onDragOver={onDragOver}
-              className="rounded-xl border-2 border-dashed border-[#3a3a3a] bg-[#151518] p-4"
+              className="rounded-xl border-2 border-dashed border-[#3f3e3e] bg-[#1b1b1b] p-4"
             >
               <div className="flex flex-col items-start gap-3">
                 <div className="text-sm text-gray-300">เลือกรูปใหม่</div>
-
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-lg border border-[#3a3a3a] bg-[#23232a] text-gray-200 hover:bg-[#30303a] transition"
+                    className="px-3 py-1.5 rounded-lg border border-[#3f3e3e] bg-[#2d2d2d] text-gray-200 hover:bg-[#303030] transition"
                   >
                     เลือกไฟล์
                   </button>
                   <span className="text-xs text-gray-400">
-                    รองรับ .jpg .png .webp ขนาดไม่เกิน ~5MB (ลากไฟล์มาวางที่กรอบนี้ได้)
+                    รองรับ .jpg .png .webp ขนาดไม่เกิน ~5MB (ลากไฟล์มาวางที่กล่องนี้ได้)
                   </span>
                 </div>
-
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -257,9 +263,8 @@ export default function MenuDetail() {
                   onChange={onPickFile}
                   className="hidden"
                 />
-
                 {imageFile ? (
-                  <div className="mt-2 w-full flex items-center justify-between rounded-lg bg-[#23232a] border border-[#35353f] px-3 py-2">
+                  <div className="mt-2 w-full flex items-center justify-between rounded-lg bg-[#2d2d2d] border border-[#3f3e3e] px-3 py-2">
                     <div className="text-xs text-gray-300 truncate">
                       {imageFile.name}{" "}
                       <span className="text-gray-400">
@@ -285,4 +290,3 @@ export default function MenuDetail() {
     </AppLayout>
   );
 }
-  
