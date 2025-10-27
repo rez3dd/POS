@@ -1,48 +1,87 @@
-// src/routes/categories.ts
 import express from "express";
 import prisma from "../prisma";
 
 const router = express.Router();
 
-/** GET /api/categories
- *  คืนรายการหมวดหมู่ทั้งหมด
- */
-router.get("/", async (_req, res, next) => {
+/** GET /api/categories - รายการหมวดหมู่ทั้งหมด */
+router.get("/", async (_req, res) => {
   try {
     const cats = await prisma.category.findMany({
       orderBy: { name: "asc" },
     });
     res.json(cats);
-  } catch (e) {
-    next(e);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("GET /categories failed:", err);
+    res.status(500).json({ message });
   }
 });
 
-/** POST /api/categories
- *  body: { name: string }
- *  สร้างหมวดหมู่ใหม่ (ถ้าชื่อซ้ำจะ upsert หรือแจ้งเตือนตามต้องการ)
- */
-router.post("/", async (req, res, next) => {
+/** POST /api/categories - เพิ่มหมวดหมู่ใหม่ (กันชื่อซ้ำแบบไม่สนตัวพิมพ์) */
+router.post("/", async (req, res) => {
   try {
-    const name = String(req.body?.name || "").trim();
-    if (!name) {
-      return res.status(400).json({ message: "ต้องระบุชื่อหมวดหมู่" });
+    const raw = String(req.body?.name ?? "").trim();
+    if (!raw) return res.status(400).json({ message: "กรุณาระบุชื่อหมวดหมู่" });
+
+    // ดึงทั้งหมดมาเช็คชื่อซ้ำเองแบบ lowercase
+    const all = await prisma.category.findMany();
+    const existed = all.find((c) => c.name.toLowerCase() === raw.toLowerCase());
+    if (existed) {
+      return res.status(409).json({ message: "มีหมวดหมู่นี้อยู่แล้ว", category: existed });
     }
 
-    // ใช้ upsert เพื่อป้องกันกดซ้ำ/ชื่อซ้ำ (unique ที่ schema)
-    const created = await prisma.category.upsert({
-      where: { name },
-      update: {},         // ถ้าชื่อซ้ำจะไม่แก้อะไร
-      create: { name },
-    });
-
+    const created = await prisma.category.create({ data: { name: raw } });
     res.status(201).json(created);
-  } catch (e: any) {
-    // ถ้าอยากบังคับให้ชื่อซ้ำ = 409 แทน upsert ก็จับ P2002 ได้
-    if (e?.code === "P2002") {
-      return res.status(409).json({ message: "ชื่อหมวดหมู่ซ้ำ" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("POST /categories failed:", err);
+    res.status(500).json({ message });
+  }
+});
+
+/** PUT /api/categories/:id - แก้ชื่อหมวดหมู่ */
+router.put("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "id ไม่ถูกต้อง" });
+
+    const raw = String(req.body?.name ?? "").trim();
+    if (!raw) return res.status(400).json({ message: "กรุณาระบุชื่อหมวดหมู่" });
+
+    // เช็คชื่อซ้ำกับตัวอื่น
+    const all = await prisma.category.findMany();
+    const dup = all.find((c) => c.name.toLowerCase() === raw.toLowerCase() && c.id !== id);
+    if (dup) {
+      return res.status(409).json({ message: "มีหมวดหมู่นี้อยู่แล้ว", category: dup });
     }
-    next(e);
+
+    const updated = await prisma.category.update({
+      where: { id },
+      data: { name: raw },
+    });
+    res.json(updated);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("PUT /categories/:id failed:", err);
+    res.status(500).json({ message });
+  }
+});
+
+/** DELETE /api/categories/:id - ลบหมวดหมู่ (กัน FK error) */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "id ไม่ถูกต้อง" });
+
+    await prisma.category.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (err: any) {
+    if (err?.code === "P2003") {
+      return res.status(400).json({ message: "ลบไม่ได้: หมวดหมู่ถูกใช้งานโดยเมนู" });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("DELETE /categories/:id failed:", err);
+    res.status(500).json({ message });
   }
 });
 

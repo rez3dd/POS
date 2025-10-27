@@ -1,22 +1,13 @@
 // prisma/schema.prisma
+// ✅ เพิ่มส่วน generator และ datasource ด้านบนให้ครบ
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  // ถ้าใช้ .env อยู่แล้ว แนะนำใช้แบบนี้ ↓ แล้วตั้งค่า DATABASE_URL ใน .env
-  // url = env("DATABASE_URL")
-  // สำหรับ SQLite แบบไฟล์เดียวในโฟลเดอร์ prisma ใช้แบบนี้ก็ได้ (ไม่ต้อง .env):
-  provider = "sqlite"
-  url      = "file:./dev.db"
-}
-
-/* =========================
-   ENUMS (ช่วยกันสะกดผิด)
-========================= */
-enum Role {
-  ADMIN
-  STAFF
+  provider = "sqlite" // ใช้ SQLite ตามโปรเจกต์ของคุณ
+  url      = env("DATABASE_URL") // อ่านค่าจากไฟล์ .env
 }
 
 enum MenuStatus {
@@ -24,97 +15,73 @@ enum MenuStatus {
   UNAVAILABLE
 }
 
+enum Role {
+  ADMIN
+  STAFF
+}
+
+
+model Category {
+  id    Int    @id @default(autoincrement())
+  name  String
+  menus Menu[]
+}
+
+model Menu {
+  id         Int        @id @default(autoincrement())
+  name       String
+  price      Int        @default(0)
+  imageUrl   String?
+  status     MenuStatus @default(AVAILABLE)
+  categoryId Int?
+  category   Category?  @relation(fields: [categoryId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items OrderItem[]
+}
+
+model Order {
+  id           Int         @id @default(autoincrement())
+  name         String? // ✅ เปลี่ยนเป็น optional แล้ว
+  code         String      @unique
+  customerName String?
+  method       String? // ✅ เพิ่มรองรับจากโค้ด backend
+  amountPaid   Int? // ✅ เพิ่มรองรับจากโค้ด backend
+  change       Int? // ✅ เพิ่มรองรับจากโค้ด backend
+  status       OrderStatus @default(UNPAID)
+  note         String? // ✅ เพิ่มรองรับจากโค้ด backend
+  total        Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  items        OrderItem[]
+
+  @@index([createdAt], name: "idx_order_createdAt")
+}
+
 enum OrderStatus {
   UNPAID
   PAID
+  CANCELLED
 }
 
-enum PaymentMethod {
-  CASH
-  QR
-}
+model OrderItem {
+  id      Int @id @default(autoincrement())
+  orderId Int
+  menuId  Int
+  qty     Int
+  price   Int
 
-/* =========================
-   MODELS
-========================= */
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menu  Menu  @relation(fields: [menuId], references: [id])
+}
 model User {
   id        Int      @id @default(autoincrement())
   name      String?
   email     String   @unique
   password  String
-  role      Role     @default(STAFF)
+  role      Role     @default(STAFF)   // ← ใช้ enum
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@index([role])
-}
-
-model Category {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  menus     Menu[]
-
-  @@index([name])
-}
-
-model Menu {
-  id         Int         @id @default(autoincrement())
-  name       String
-  price      Int
-  status     MenuStatus  @default(AVAILABLE)
-  imageUrl   String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-
-  // ความสัมพันธ์กับ Category
-  categoryId Int?
-  category   Category?   @relation(fields: [categoryId], references: [id])
-
-  // ความสัมพันธ์กับ OrderItem
-  items      OrderItem[]
-
-  @@index([status])
-  @@index([categoryId])
-  @@index([createdAt])
-}
-
-model Order {
-  id           Int           @id @default(autoincrement())
-  code         String        @unique                      // จะเซ็ตค่าใน backend ให้รูปแบบที่ต้องการ
-  customerName String        @default("ลูกค้าหน้าร้าน")
-  status       OrderStatus   @default(UNPAID)            // มีแค่ UNPAID/PAID ตามที่ต้องการ
-  note         String?
-  total        Int           @default(0)
-  method       PaymentMethod?
-  amountPaid   Int?
-  change       Int?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-
-  items        OrderItem[]
-
-  @@index([status])
-  @@index([createdAt])
-}
-
-model OrderItem {
-  id        Int      @id @default(autoincrement())
-
-  orderId   Int
-  menuId    Int
-
-  // เก็บ snapshot ชื่อ/ราคา ตอนสร้างบิล เพื่อไม่ให้ราคาเปลี่ยนย้อนหลัง
-  name      String
-  price     Int
-  qty       Int
-  note      String?
-
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menu      Menu     @relation(fields: [menuId], references: [id])
-
-  @@index([orderId])
-  @@index([menuId])
 }

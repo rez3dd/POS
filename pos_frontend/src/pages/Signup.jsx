@@ -131,8 +131,7 @@ export default function Signup() {
               onChange={onChange("role")}
             >
               <option value="STAFF">พนักงาน</option>
-              {/* ถ้าไม่อยากให้สมัครเป็น Admin ให้ตัด option นี้ออก */}
-              <option value="ADMIN">ผู้ดูแลระบบ</option>
+
             </select>
           </div>
 

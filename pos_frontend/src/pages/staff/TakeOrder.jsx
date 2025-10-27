@@ -168,13 +168,13 @@ export default function TakeOrder() {
             {cart.map((c) => (
               <div key={c.menuId} className="bg-[#2d2d2d] rounded-lg border border-[#3f3e3e] p-3 flex items-center justify-between">
                 <div>
-                  <div className="text-white font-medium">{c.name}</div>
+                  <div className="text-white font-medium text-lg">{c.name}</div>
                   <div className="text-xs text-gray-400">{c.price} ฿</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => changeQty(c.menuId, -1)} className="px-2 py-1 rounded bg-[#333] text-white">-</button>
-                  <div className="w-6 text-center text-white">{c.qty}</div>
-                  <button onClick={() => changeQty(c.menuId, +1)} className="px-2 py-1 rounded bg-[#333] text-white">+</button>
+                  <button onClick={() => changeQty(c.menuId, -1)} className="px-3 py-1 rounded bg-[#333] text-white">-</button>
+                  <div className="w-8 text-center text-white">{c.qty}</div>
+                  <button onClick={() => changeQty(c.menuId, +1)} className="px-3 py-1 rounded bg-[#333] text-white">+</button>
                   <button onClick={() => removeItem(c.menuId)} className="ml-2 px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white">ลบ</button>
                 </div>
               </div>
@@ -215,10 +215,16 @@ export default function TakeOrder() {
 
           {showQR && (
             <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-              <div className="bg-[#232323] border border-[#3f3e3e] rounded-2xl p-6 text-center relative">
-                <button onClick={() => setShowQR(false)} className="absolute top-2 right-3 text-gray-400 hover:text-white text-lg">×</button>
+              <div className="bg-[#232323] border border-[#3f3e3e] rounded-5xl p-6 text-center relative">
+              <button
+                  onClick={() => setShowQR(false)}
+                  className="absolute top-4 right-3 h-6 w-6 flex items-center justify-center rounded text-gray-400 hover:text-white text-4xl"
+                  aria-label="Close"
+              >
+                ×
+              </button>
                 <h2 className="text-white font-semibold text-lg mb-3">สแกน QR พร้อมเพย์</h2>
-                <img src="/qr_yourshop.png" alt="QR" className="w-64 h-64 object-contain mx-auto rounded-lg border border-[#3f3e3e]" />
+                <img src="my-qr.png" alt="QR" className="w-110 h-150 object-contain mx-auto rounded-lg border border-[#3f3e3e]" />
                 <div className="mt-3 text-sm text-gray-400">โปรดชำระยอด {total}฿ แล้วกดยืนยันหลังโอนสำเร็จ</div>
               </div>
             </div>

@@ -1,145 +1,114 @@
+// pos-backend/src/routes/payments.ts
 import express from "express";
 import prisma from "../prisma";
-import { requireAuth, requireRole } from "../middlewares/auth";
-import { OrderStatus } from "@prisma/client";
 
 const router = express.Router();
 
-// ต้องล็อกอิน และอนุญาต STAFF/ADMIN เข้าถึงหน้าเก็บเงิน
-router.use(requireAuth, requireRole(["STAFF", "ADMIN"]));
-
 /**
- * GET /api/payments/eligible
- * รายการออเดอร์ที่ "ยังไม่ชำระ" ทั้งหมด (ใช้แทนการหา PENDING/READY เดิม)
+ * GET /api/payments/order/:id
+ * ดึงข้อมูลออเดอร์พร้อมรายการสินค้า และชื่อเมนู (menu.name)
  */
-router.get("/eligible", async (_req, res, next) => {
+router.get("/order/:id", async (req, res) => {
   try {
-    const orders = await prisma.order.findMany({
-      where: { status: OrderStatus.UNPAID },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        code: true,
-        customerName: true,
-        total: true,
-        status: true,
-        createdAt: true,
-        method: true,
-        amountPaid: true,
-        change: true,
+    const id = req.params.id;
+    const where =
+      /^\d+$/.test(id) ? { id: Number(id) } : { code: decodeURIComponent(id) };
+
+    const order = await prisma.order.findFirst({
+      where,
+      include: {
         items: {
-          select: {
-            id: true,
-            name: true,
-            qty: true,
-            price: true,
-            note: true,
+          include: {
+            menu: {
+              select: { id: true, name: true, imageUrl: true, price: true },
+            },
           },
         },
       },
     });
-    res.json(orders);
-  } catch (e) {
-    next(e);
+
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    res.json(order);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("GET /payments/order/:id failed:", err);
+    res.status(500).json({ message });
   }
 });
 
 /**
- * POST /api/payments/cash
- * body: { orderId: number, amountPaid: number }
- * ตั้งสถานะเป็น PAID และคำนวณเงินทอน
+ * POST /api/payments/pay
+ * Body:
+ * {
+ *   "orderId": 123,             // หรือส่ง "code": "#ORD-..."
+ *   "method": "CASH" | "QR" | "CARD" | "...",
+ *   "amountPaid": 200,
+ *   "note": "ข้อความเพิ่มเติม (optional)"
+ * }
  */
-router.post("/cash", async (req, res, next) => {
+router.post("/pay", async (req, res) => {
   try {
-    const orderId = Number(req.body?.orderId);
-    const amountPaidNum = Number(req.body?.amountPaid);
+    const { orderId, code, method, amountPaid, note } = req.body || {};
 
-    if (!orderId || !Number.isFinite(orderId)) {
-      return res.status(400).json({ message: "orderId ไม่ถูกต้อง" });
-    }
-    if (!Number.isFinite(amountPaidNum)) {
-      return res.status(400).json({ message: "จำนวนเงินที่รับมาไม่ถูกต้อง" });
+    if (!orderId && !code) {
+      return res.status(400).json({ message: "กรุณาระบุ orderId หรือ code" });
     }
 
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const where =
+      orderId ? { id: Number(orderId) } : { code: String(code) };
+
+    // ดึงออเดอร์ + รายการสินค้า (เพื่อคำนวณยอด)
+    const order = await prisma.order.findFirst({
+      where,
+      include: {
+        items: {
+          include: {
+            menu: { select: { id: true, name: true, imageUrl: true, price: true } },
+          },
+        },
+      },
+    });
+
     if (!order) return res.status(404).json({ message: "ไม่พบออเดอร์" });
-
-    if (order.status === OrderStatus.PAID) {
-      // จ่ายแล้ว ไม่ต้องจ่ายซ้ำ
-      return res.json(order);
-    }
-    const total = order.total ?? 0;
-    if (amountPaidNum < total) {
-      return res.status(400).json({ message: "รับเงินไม่เพียงพอต่อยอดรวม" });
+    if (!Array.isArray(order.items) || order.items.length === 0) {
+      return res.status(400).json({ message: "ออเดอร์นี้ไม่มีรายการสินค้า" });
     }
 
-    const change = amountPaidNum - total;
+    // คำนวณยอดรวมจาก items (qty * price ที่บันทึกไว้ใน OrderItem)
+    const computedTotal = order.items.reduce(
+      (sum, it) => sum + Number(it.qty) * Number(it.price),
+      0
+    );
 
+    const total = computedTotal; // ใช้ยอดจากรายการสินค้าเป็นหลัก
+    const paid = Number(amountPaid ?? 0);
+    const change = Math.max(paid - total, 0);
+
+    // อัปเดตสถานะการชำระเงิน
     const updated = await prisma.order.update({
-      where: { id: orderId },
+      where: { id: order.id },
       data: {
-        status: OrderStatus.PAID,
-        method: "CASH",
-        amountPaid: amountPaidNum,
+        status: "PAID", // ตาม enum OrderStatus ใน schema
+        method: method ?? order.method ?? null,
+        amountPaid: paid,
         change,
+        note: note ?? order.note ?? null,
+        total, // sync total ให้เท่ากับยอดจาก items
+      },
+      include: {
+        items: {
+          include: {
+            menu: { select: { id: true, name: true, imageUrl: true, price: true } },
+          },
+        },
       },
     });
 
     res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * POST /api/payments/qr/confirm
- * body: { orderId: number }
- * เคสพร้อมเพย์: ยืนยันการชำระ (สมมติรับยอดครบ) → ตั้งสถานะ PAID, method = "QR"
- */
-router.post("/qr/confirm", async (req, res, next) => {
-  try {
-    const orderId = Number(req.body?.orderId);
-    if (!orderId || !Number.isFinite(orderId)) {
-      return res.status(400).json({ message: "orderId ไม่ถูกต้อง" });
-    }
-
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
-    if (!order) return res.status(404).json({ message: "ไม่พบออเดอร์" });
-
-    if (order.status === OrderStatus.PAID) {
-      // จ่ายแล้ว ไม่ต้องจ่ายซ้ำ
-      return res.json(order);
-    }
-
-    const updated = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.PAID,
-        method: "QR",
-        amountPaid: order.total ?? 0,
-        change: 0,
-      },
-    });
-
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * (ออปชัน) GET /api/payments/summary
- * Summary ง่าย ๆ ของจำนวนบิลที่ยังไม่ชำระ / ชำระแล้ว
- */
-router.get("/summary", async (_req, res, next) => {
-  try {
-    const [unpaid, paid] = await Promise.all([
-      prisma.order.count({ where: { status: OrderStatus.UNPAID } }),
-      prisma.order.count({ where: { status: OrderStatus.PAID } }),
-    ]);
-    res.json({ unpaid, paid });
-  } catch (e) {
-    next(e);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("POST /payments/pay failed:", err);
+    res.status(500).json({ message });
   }
 });
 

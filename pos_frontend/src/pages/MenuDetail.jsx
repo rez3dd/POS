@@ -21,15 +21,12 @@ const IMG_PLACEHOLDER =
 function abs(u) {
   if (!u) return "";
   let norm = String(u).replace(/\\/g, "/").trim();
-
   if (/^https?:\/\//i.test(norm)) return norm;
-
   norm = norm.replace(/^\.?\/*/, "");
   if (!norm.startsWith("uploads/")) {
     if (!norm.includes("/")) norm = `uploads/${norm}`;
     else norm = `uploads/${norm.replace(/^\/+/, "")}`;
   }
-
   const path = `/${norm}`;
   const base = API_BASE.replace(/\/api$/i, "");
   return `${base}${path}`;
@@ -52,6 +49,11 @@ export default function MenuDetail() {
 
   const [categories, setCategories] = useState([]);
   const [currentImage, setCurrentImage] = useState(null);
+
+  // 👇 state สำหรับเพิ่มหมวดหมู่ใหม่
+  const [newCatName, setNewCatName] = useState("");
+  const [addingCat, setAddingCat] = useState(false);
+
   const [imageFile, setImageFile] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -59,6 +61,11 @@ export default function MenuDetail() {
     () => (imageFile ? URL.createObjectURL(imageFile) : null),
     [imageFile]
   );
+
+  async function refreshCategories() {
+    const cats = await listCategories();
+    setCategories(Array.isArray(cats) ? cats : cats?.data || []);
+  }
 
   // โหลดข้อมูล
   useEffect(() => {
@@ -71,7 +78,6 @@ export default function MenuDetail() {
         if (!alive) return;
 
         setCategories(Array.isArray(cats) ? cats : cats?.data || []);
-
         setForm({
           name: data?.name || "",
           price: String(data?.price ?? ""),
@@ -88,29 +94,78 @@ export default function MenuDetail() {
     return () => { alive = false; };
   }, [id]);
 
-  // บันทึก
+  // ⬆️ อัปโหลดไฟล์ไป /api/upload แล้วได้ URL จริงกลับมา
+  async function uploadNewImage() {
+    if (!imageFile) return null;
+    const fd = new FormData();
+    fd.append("image", imageFile);
+    const res = await api.post("/upload", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+      withCredentials: true,
+    });
+    const url = res.data?.url;
+    if (!url) throw new Error("ไม่มี url กลับมาจาก /api/upload");
+    return url;
+  }
+
+  // ➕ เพิ่มหมวดหมู่ใหม่
+  async function addCategory() {
+    const name = String(newCatName || "").trim();
+    if (!name) return alert("กรุณากรอกชื่อหมวดหมู่");
+    setAddingCat(true);
+    setErr("");
+    try {
+      // เรียกตรง ๆ ที่ /api/categories (รองรับโค้ด backend ตอนนี้)
+      const res = await api.post("/categories", { name });
+      const cat = res?.data;
+      await refreshCategories();
+      // เลือกหมวดหมู่ให้อัตโนมัติ
+      if (cat?.id) {
+        setForm((f) => ({ ...f, categoryId: cat.id }));
+      }
+      setNewCatName("");
+      alert(`เพิ่มหมวดหมู่ "${name}" สำเร็จ`);
+    } catch (e) {
+      // 409 = ซ้ำ
+      const msg = e?.response?.data?.message || e?.message || "เพิ่มหมวดหมู่ไม่สำเร็จ";
+      alert(msg);
+    } finally {
+      setAddingCat(false);
+    }
+  }
+
+  // บันทึก (ถ้ามีไฟล์ใหม่ → อัปโหลดก่อน แล้วค่อย update imageUrl)
   const onSave = async (e) => {
     e?.preventDefault();
     setSaving(true);
     setErr("");
     try {
+      let newUrl = null;
+      if (imageFile) {
+        newUrl = await uploadNewImage(); // 1) upload ก่อน
+      }
+
+      // 2) อัปเดตข้อมูลเมนู (แนบ imageUrl เมื่อมีรูปใหม่)
       await updateMenu(Number(id), {
         name: form.name,
         price: Number(form.price),
         categoryId: form.categoryId ? Number(form.categoryId) : null,
         status: form.status,
-        imageFile, // มีไฟล์ก็อัปโหลด
+        ...(newUrl ? { imageUrl: newUrl } : {}),
       });
 
-      // โหลดข้อมูลใหม่ เพื่อเอา imageUrl ล่าสุด
+      // 3) โหลดข้อมูลใหม่ เพื่อดึง imageUrl ล่าสุดมาแสดง
       const fresh = await getMenuById(id);
-      setCurrentImage(fresh?.imageUrl ? abs(fresh.imageUrl) : null);
+      const data = fresh?.data || fresh;
+      setCurrentImage(data?.imageUrl ? abs(data.imageUrl) : null);
+
+      // ล้างไฟล์เลือกใหม่
       setImageFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
       alert("บันทึกสำเร็จ");
-    } catch (e) {
-      setErr(e?.message || "บันทึกไม่สำเร็จ");
+    } catch (e2) {
+      setErr(e2?.message || "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -120,7 +175,7 @@ export default function MenuDetail() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!/^image\//.test(file.type)) return alert("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
-    if (file.size > 5 * 1024 * 1024) return alert("ไฟล์ใหญ่เกินไป (เกิน 5MB)");
+    if (file.size > 5 * 1024 * 1024) return alert("ไฟล์ใหญ่เกิน 5MB");
     setImageFile(file);
   };
   const clearFile = () => {
@@ -188,16 +243,43 @@ export default function MenuDetail() {
                 </div>
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">หมวดหมู่</label>
-                  <select
-                    className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
-                    value={form.categoryId ?? ""}
-                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                  >
-                    <option value="">— ไม่ระบุ —</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select
+                      className="w-full bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
+                      value={form.categoryId ?? ""}
+                      onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                    >
+                      <option value="">— ไม่ระบุ —</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* แถว “เพิ่มหมวดหมู่ใหม่” */}
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="เพิ่มหมวดหมู่ใหม่ เช่น เครื่องดื่ม"
+                      className="flex-1 bg-[#2d2d2d] border border-[#3f3e3e] rounded-lg p-2 text-white"
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addCategory();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={addCategory}
+                      disabled={addingCat || !newCatName.trim()}
+                      className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+                    >
+                      {addingCat ? "กำลังเพิ่ม..." : "เพิ่มหมวดหมู่"}
+                    </button>
+                  </div>
                 </div>
               </div>
 

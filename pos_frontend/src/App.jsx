@@ -17,7 +17,7 @@ import OrderDetail from "./pages/OrderDetail";
 
 // staff
 import TakeOrder from "./pages/staff/TakeOrder";
-import PaymentPage from "./pages/staff/PaymentPage"; // ชื่อไฟล์ตัวจริง (ระวังตัวใหญ่/เล็ก)
+// import PaymentPage from "./pages/staff/PaymentPage"; // ชื่อไฟล์ตัวจริง (ระวังตัวใหญ่/เล็ก)
 
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -87,9 +87,9 @@ export default function App() {
           <Route path="/takeorder" element={
             <ProtectedRoute allowedRoles={["staff"]}><TakeOrder /></ProtectedRoute>
           } />
-          <Route path="/payment" element={
+          {/* <Route path="/payment" element={
             <ProtectedRoute allowedRoles={["staff"]}><PaymentPage /></ProtectedRoute>
-          } />
+          } /> */}
 
           {/* ✅ เส้นทางรวม (ใช้ร่วมกัน) */}
           <Route path="/orders" element={

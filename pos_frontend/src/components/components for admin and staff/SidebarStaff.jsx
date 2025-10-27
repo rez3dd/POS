@@ -10,7 +10,7 @@ export default function SidebarStaff() {
     { to: "/HomeStaff", icon: <AiOutlineHome />, label: "หน้าหลัก" },
     { to: "/orders", icon: <BsCartCheck />, label: "คำสั่งซื้อ" },
     { to: "/takeorder", icon: <BsCartPlus />, label: "รับออเดอร์" },
-    { to: "/payment", icon: <RiMoneyDollarCircleLine />, label: "ชำระเงิน" }, // ✅ แก้ path
+    // { to: "/payment", icon: <RiMoneyDollarCircleLine />, label: "ชำระเงิน" }, // ✅ แก้ path
     { to: "/logout", icon: <FiLogOut />, label: "ออกจากระบบ" },
   ];
 

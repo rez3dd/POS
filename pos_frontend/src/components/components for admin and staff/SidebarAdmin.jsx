@@ -12,7 +12,7 @@ export default function SidebarAdmin() {
     { to: "/orders", icon: <BsCartCheck />, label: "คำสั่งซื้อ" },
     { to: "/menu", icon: <GiKnifeFork />, label: "เมนูอาหาร" },
     { to: "/stats", icon: <HiOutlineChartBar />, label: "สถิติ" },
-    { to: "/users", icon: <FiUsers />, label: "พนักงาน" },
+    { to: "/users", icon: <FiUsers />, label: "ผู้ใช้งาน" },
     { to: "/logout", icon: <FiLogOut />, label: "ออกจากระบบ" },
   ];
 
